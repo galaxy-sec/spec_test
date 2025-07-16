@@ -1,0 +1,138 @@
+#!/bin/bash
+
+# Use bash-specific features only if running in bash
+if [ -n "${BASH_VERSION:-}" ]; then
+    set -euo pipefail
+else
+    set -eu
+fi
+
+# 检测操作系统类型
+OS=""
+if [ "$(uname)" = "Linux" ]; then
+    OS="ubuntu"
+    TARGET_DIR="/usr/bin"
+elif [ "$(uname)" = "Darwin" ]; then
+    OS="macos"
+    TARGET_DIR="/usr/local/bin"
+else
+    echo "❌ 不支持的OS类型: $(uname)"
+    exit 1
+fi
+echo "✅ 检测到操作系统: $OS"
+echo "📁 目标安装目录: $TARGET_DIR"
+
+# 安装openssl的函数
+install_openssl() {
+    echo "🔍 检测OpenSSL安装..."
+
+    # 1. 检查 openssl 命令是否存在
+    if ! command -v openssl > /dev/null 2>&1; then
+        echo "⚠️ OpenSSL未安装，开始安装..."
+        if [ "$OS" = "ubuntu" ]; then
+            sudo apt update
+            sudo apt install -y openssl libssl-dev
+        elif [ "$OS" = "macos" ]; then
+            if ! command -v brew > /dev/null 2>&1; then
+                echo "❌ Homebrew未安装，请先安装Homebrew"
+                exit 1
+            fi
+            brew install openssl
+        fi
+    fi
+
+    # 2. 检查 openssl 版本
+    OPENSSL_VERSION=$(openssl version 2>/dev/null | awk '{print $2}' | cut -d. -f1)
+    if [ "$OS" = "ubuntu" ] && [ "$OPENSSL_VERSION" != "3" ]; then
+        echo "❌ 检测到 OpenSSL 版本不是 3.x，请确保你的系统为 Ubuntu 22.04 或更高版本。"
+        echo "    如果是 Ubuntu 20.04 或更低版本，请升级系统或手动安装 OpenSSL 3。"
+        exit 1
+    fi
+
+    # 3. 检查 libssl.so.3 是否存在
+    if [ "$OS" = "ubuntu" ]; then
+        if ! ls /usr/lib/x86_64-linux-gnu/libssl.so.3 >/dev/null 2>&1; then
+            echo "❌ 未检测到 libssl.so.3 (OpenSSL 3)，请确保你的系统为 Ubuntu 22.04 或更高版本。"
+            echo "    如果是 Ubuntu 20.04 或更低版本，请升级系统或手动安装 OpenSSL 3。"
+            exit 1
+        fi
+    fi
+
+    echo "✅ OpenSSL 3 (libssl.so.3) 已就绪"
+}
+
+# 获取最新版本号（简化版本处理）
+get_latest_version() {
+    file=$1
+    version_url=""
+    
+    if [ "$OS" = "ubuntu" ]; then
+        version_url="https://dy-sec-generic.pkg.coding.net/galaxy-open/ubuntu22/${file}_latest_version.txt"
+    elif [ "$OS" = "macos" ]; then
+        version_url="https://dy-sec-generic.pkg.coding.net/galaxy-open/macos/${file}_latest_version.txt"
+    fi
+    
+    echo "🔍 获取 ${file} 最新版本..." >&2
+    # 直接获取版本号并去除尾部换行符
+    version=$(curl -fsL "$version_url" | tr -d '\n')
+    
+    if [ -z "$version" ]; then
+        echo "❌ 无法获取 ${file} 的最新版本" >&2
+        exit 1
+    fi
+    
+    echo "✅ ${file} 最新版本: $version" >&2
+    echo "$version"
+}
+
+# 下载并安装文件的函数
+download_and_install() {
+    files="ds-sys ds-mod gflow"
+    base_url=""
+    
+    if [ "$OS" = "ubuntu" ]; then
+        base_url="https://dy-sec-generic.pkg.coding.net/galaxy-open/ubuntu22/"
+    elif [ "$OS" = "macos" ]; then
+        base_url="https://dy-sec-generic.pkg.coding.net/galaxy-open/macos/"
+    fi
+
+    for file in $files; do
+        # 获取最新版本号
+        version=$(get_latest_version "$file")
+        
+        # 构建带版本号的下载URL
+        download_url="${base_url}${file}?version=${version}"
+        
+        echo "⬇️ 下载 $file (版本: $version)..."
+        curl -fL "$download_url" -o "$file"
+        
+        if [ -f "$file" ]; then
+            chmod +x "$file"
+            echo "🔧 移动 $file 到 $TARGET_DIR"
+            
+            # 移动文件到系统路径
+            sudo mv -f "$file" "$TARGET_DIR/$file"
+            
+            # 验证安装
+            if command -v "$file" > /dev/null 2>&1; then
+                echo "✅ $file 安装成功"
+            else
+                echo "❌ $file 安装失败"
+                exit 1
+            fi
+        else
+            echo "❌ $file 下载失败"
+            exit 1
+        fi
+    done
+}
+
+# 主执行流程
+main() {
+    install_openssl
+    download_and_install
+    echo ""
+    echo "🎉 所有操作已完成！文件已安装到系统路径: $TARGET_DIR"
+}
+
+main
