@@ -87,7 +87,7 @@ get_latest_version() {
 
 # 下载并安装文件的函数
 download_and_install() {
-    files="ds-sys ds-mod gflow"
+    files="ds-sys ds-mod gflow gprj"
     base_url=""
     
     if [ "$OS" = "ubuntu" ]; then
